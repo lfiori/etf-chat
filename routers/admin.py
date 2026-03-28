@@ -35,25 +35,28 @@ def admin_stats(
     if not os.path.exists(db):
         raise HTTPException(503, "Database non trovato")
 
-    where, params = _date_where(start, end)
     conn = _conn(db)
     c = conn.cursor()
 
+    where_all,  p_all  = _build_where(start=start, end=end)
+    where_msg,  p_msg  = _build_where(event_type="user_message", start=start, end=end)
+    where_resp, p_resp = _build_where(event_type="ai_response",  start=start, end=end)
+
     total_sessions = c.execute(
-        f"SELECT COUNT(DISTINCT session_id) FROM access_log {where}", params
+        f"SELECT COUNT(DISTINCT session_id) FROM access_log {where_all}", p_all
     ).fetchone()[0]
 
     total_messages = c.execute(
-        f"SELECT COUNT(*) FROM access_log WHERE event_type='user_message' {_and(where)}", params
+        f"SELECT COUNT(*) FROM access_log {where_msg}", p_msg
     ).fetchone()[0]
 
     total_responses = c.execute(
-        f"SELECT COUNT(*) FROM access_log WHERE event_type='ai_response' {_and(where)}", params
+        f"SELECT COUNT(*) FROM access_log {where_resp}", p_resp
     ).fetchone()[0]
 
     tokens = c.execute(
         f"SELECT COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0) "
-        f"FROM access_log WHERE event_type='ai_response' {_and(where)}", params
+        f"FROM access_log {where_resp}", p_resp
     ).fetchone()
 
     date_range = c.execute(
@@ -188,8 +191,14 @@ async def trigger_update():
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
-def _date_where(start: Optional[str], end: Optional[str]):
+def _build_where(event_type: Optional[str] = None,
+                 start: Optional[str] = None,
+                 end: Optional[str] = None):
+    """Costruisce una clausola WHERE con event_type e/o filtro date."""
     clauses, params = [], []
+    if event_type:
+        clauses.append("event_type = ?")
+        params.append(event_type)
     if start:
         clauses.append("date >= ?")
         params.append(start)
@@ -200,6 +209,5 @@ def _date_where(start: Optional[str], end: Optional[str]):
     return where, tuple(params)
 
 
-def _and(where: str) -> str:
-    """Aggiunge AND se c'è già una clausola WHERE, altrimenti aggiunge WHERE."""
-    return "AND" if where else "WHERE"
+def _date_where(start: Optional[str], end: Optional[str]):
+    return _build_where(start=start, end=end)

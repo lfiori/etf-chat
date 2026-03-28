@@ -32,7 +32,7 @@ def test_record_access_insert(test_db_path, clean_access_log):
     conn.close()
     assert row is not None
     assert row[1] == "user_message"   # event_type
-    assert row[6] == "Ciao!"          # message_text
+    assert row[5] == "Ciao!"          # message_text (colonna 5)
 
 
 def test_record_access_ai_response(test_db_path, clean_access_log):

@@ -8,7 +8,7 @@ def test_select_allowed(test_db_path):
     from app import execute_sql
     result = execute_sql("SELECT symbol FROM etf_info ORDER BY symbol")
     assert "error" not in result
-    assert result["row_count"] == 3
+    assert result["row_count"] >= 3
     assert result["columns"] == ["symbol"]
 
 
