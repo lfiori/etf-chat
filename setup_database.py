@@ -166,8 +166,8 @@ ETF_LIST = [
 ]
 
 
-def create_database() -> None:
-    conn = sqlite3.connect(DB_PATH)
+def create_database(db_path: str = DB_PATH) -> None:
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
 
     c.execute("""
@@ -199,15 +199,23 @@ def create_database() -> None:
     c.execute("CREATE INDEX IF NOT EXISTS idx_prices_date        ON etf_prices(date)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_prices_symbol_date ON etf_prices(symbol, date)")
 
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.commit()
     conn.close()
+
+    # Crea anche le tabelle di tracking
+    from db_tracking import create_tracking_tables, seed_catalog_table_from_setup
+    create_tracking_tables(db_path)
+    seed_catalog_table_from_setup(db_path)
     print("✓ Schema database creato")
 
 
-def download_and_store(symbol: str, name: str, category: str, conn: sqlite3.Connection) -> bool:
+def download_and_store(symbol: str, name: str, category: str, conn: sqlite3.Connection, start_date: str = None, end_date: str = None) -> bool:
     try:
         ticker = yf.Ticker(symbol)
-        hist = ticker.history(start=START_DATE, end=END_DATE, auto_adjust=False)
+        s = start_date or START_DATE
+        e = end_date or END_DATE
+        hist = ticker.history(start=s, end=e, auto_adjust=False)
 
         if hist.empty:
             print(f"  ⚠  Nessun dato per {symbol}")
@@ -258,20 +266,22 @@ def download_and_store(symbol: str, name: str, category: str, conn: sqlite3.Conn
         return False
 
 
-def main() -> None:
+def main(db_path: str = DB_PATH, etf_list: list = None) -> None:
+    target = etf_list or ETF_LIST
     print("=" * 65)
     print("  ETF Database Setup")
     print(f"  Periodo: {START_DATE}  →  {END_DATE}")
-    print(f"  ETF da scaricare: {len(ETF_LIST)}")
+    print(f"  ETF da scaricare: {len(target)}")
     print("=" * 65)
 
-    create_database()
+    create_database(db_path)
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA journal_mode=WAL")
     ok, fail = 0, []
 
-    for i, (symbol, name, category) in enumerate(ETF_LIST, 1):
-        print(f"\n[{i:3d}/{len(ETF_LIST)}] {symbol:6s} — {name}")
+    for i, (symbol, name, category) in enumerate(target, 1):
+        print(f"\n[{i:3d}/{len(target)}] {symbol:6s} — {name}")
         if download_and_store(symbol, name, category, conn):
             ok += 1
         else:

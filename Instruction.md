@@ -92,3 +92,80 @@ git restore app.py        # annulla le modifiche a un file (ATTENZIONE: irrevers
 ### Regola pratica
 
 > Fai un commit ogni volta che completi qualcosa di funzionante — una feature, una correzione, una modifica significativa. Il messaggio deve spiegare **cosa** hai fatto, es: `"aggiunto pannello trace nella UI"`.
+
+---
+
+## 4. Pipeline di test
+
+### Cos'è e a cosa serve
+
+La pipeline di test verifica automaticamente che l'app funzioni correttamente. È composta da 4 livelli:
+
+| Tipo | File | Cosa verifica | Velocità |
+|---|---|---|---|
+| **Unitari** | `test_sql_helper.py`, `test_db.py` | Singole funzioni (SQL, database) | ~1s |
+| **Integrazione** | `test_api.py` | Tutti gli endpoint HTTP | ~2s |
+| **Scheduler** | `test_scheduler.py` | Aggiornamento giornaliero ETF (con dati finti) | ~2s |
+| **Qualità chat** | `test_quality.py` | Correttezza delle risposte AI (Claude-as-judge) | ~30s |
+| **Browser (E2E)** | `e2e/test_frontend.py` | Interfaccia grafica nel browser reale | ~20s |
+
+### Installazione (prima volta)
+
+```bash
+pip install -r requirements.txt
+playwright install chromium   # solo se vuoi eseguire i test browser
+```
+
+### Come eseguire i test
+
+```bash
+# Test veloci (default) — non richiedono API key né server avviato
+pytest
+
+# Test di qualità — richiedono ANTHROPIC_API_KEY e database popolato
+pytest -m quality
+
+# Test browser (E2E) — avviano automaticamente un server su porta 8765
+pytest -m e2e
+
+# Tutti i test insieme
+pytest -m ""
+
+# Un singolo file con output dettagliato
+pytest tests/test_api.py -v
+```
+
+### Come funziona ogni livello
+
+**Test unitari** — testano funzioni singole in isolamento. Usano un database temporaneo creato appositamente (non toccano mai `etf_database.db`).
+
+**Test di integrazione** — simulano richieste HTTP reali all'app senza avviare un server. Verificano che tutti gli endpoint rispondano con i dati corretti.
+
+**Test scheduler** — sostituiscono yfinance con dati finti (`mock`) per non fare richieste reali a Yahoo Finance. Verificano che il job incrementale funzioni correttamente.
+
+**Test di qualità** — mandano domande reali all'app e usano Claude Haiku come "giudice" per valutare se la risposta è corretta:
+```
+Domanda → /api/chat → risposta → Claude Haiku → "YES / NO"
+```
+Richiedono `ANTHROPIC_API_KEY` e consumano token API. Usarli prima di un rilascio importante.
+
+**Test browser (E2E)** — aprono un vero browser Chromium, navigano sull'app e verificano che gli elementi grafici siano visibili e funzionanti (tabella ETF, pagina Admin, link di navigazione, ecc.).
+
+### Struttura dei file di test
+
+```
+tests/
+├── conftest.py          ← database di test isolato e client HTTP condivisi
+├── test_sql_helper.py   ← test esecuzione SQL e sicurezza whitelist
+├── test_db.py           ← test tabelle tracking (access_log, ecc.)
+├── test_api.py          ← test endpoint /api/*
+├── test_scheduler.py    ← test aggiornamento giornaliero ETF
+├── test_quality.py      ← test qualità risposte AI (marcati @quality)
+└── e2e/
+    ├── conftest.py      ← avvio automatico del server per i test browser
+    └── test_frontend.py ← test interfaccia Playwright (marcati @e2e)
+```
+
+### Nota
+
+I test di qualità e browser sono **esclusi dal default** per non richiedere API key o tempo extra ad ogni esecuzione. Il comando `pytest` senza opzioni esegue solo i test veloci (unitari + integrazione + scheduler).

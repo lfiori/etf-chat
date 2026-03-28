@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ETF Chat — ETF Manager</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --surface2: #222636;
+      --border: #2a2e42; --text: #e2e8f0; --text-muted: #64748b;
+      --accent: #4f8ef7; --green: #22c55e; --red: #ef4444; --amber: #f59e0b;
+    }
+    body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; font-size: 14px; }
+
+    nav { background: var(--surface); border-bottom: 1px solid var(--border);
+          padding: 0 24px; height: 52px; display: flex; align-items: center; gap: 24px; }
+    nav .logo { font-weight: 700; font-size: 16px; color: var(--accent); text-decoration: none; }
+    nav a { color: var(--text-muted); text-decoration: none; font-size: 13px; }
+    nav a:hover, nav a.active { color: var(--text); }
+
+    .container { max-width: 1200px; margin: 0 auto; padding: 24px 16px; }
+    h1 { font-size: 22px; margin-bottom: 20px; }
+
+    /* toolbar */
+    .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+    .search { flex: 1; min-width: 200px; background: var(--surface2); border: 1px solid var(--border);
+              color: var(--text); border-radius: 6px; padding: 7px 12px; font-size: 13px; }
+    .search:focus { outline: none; border-color: var(--accent); }
+    select.filter { background: var(--surface2); border: 1px solid var(--border);
+                    color: var(--text); border-radius: 6px; padding: 7px 10px; font-size: 13px; }
+
+    .btn { padding: 7px 16px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; font-weight: 600; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { opacity: .9; }
+    .btn-danger  { background: var(--red);  color: #fff; }
+    .btn-danger:hover { opacity: .9; }
+    .btn-ghost   { background: var(--surface2); border: 1px solid var(--border); color: var(--text); }
+    .btn:disabled { opacity: .4; cursor: default; }
+
+    /* group chips */
+    .groups { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+    .group-chip { padding: 4px 12px; border-radius: 20px; font-size: 12px; border: 1px solid var(--border);
+                  background: var(--surface2); color: var(--text-muted); cursor: pointer; user-select: none; }
+    .group-chip:hover { color: var(--text); }
+    .group-chip.active { background: rgba(79,142,247,.2); border-color: var(--accent); color: var(--accent); }
+
+    /* stats bar */
+    .stats-bar { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; }
+    .stats-bar b { color: var(--text); }
+
+    /* table */
+    .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
+    table { width: 100%; border-collapse: collapse; }
+    thead th { background: var(--surface2); padding: 10px 12px; text-align: left; font-size: 11px;
+               text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted);
+               position: sticky; top: 0; }
+    tbody tr { border-top: 1px solid var(--border); }
+    tbody tr:hover { background: var(--surface2); }
+    tbody td { padding: 9px 12px; font-size: 13px; }
+    td.sym { font-weight: 700; font-family: monospace; color: var(--accent); }
+    .badge-indb  { background: rgba(34,197,94,.15);  color: var(--green); padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+    .badge-notdb { background: rgba(100,116,139,.12); color: var(--text-muted); padding: 2px 8px; border-radius: 4px; font-size: 11px; }
+    .chk { width: 16px; height: 16px; cursor: pointer; accent-color: var(--accent); }
+
+    /* progress */
+    #progress-area { display: none; background: var(--surface); border: 1px solid var(--border);
+                     border-radius: 10px; padding: 16px; margin-bottom: 20px; }
+    .progress-bar-wrap { height: 8px; background: var(--surface2); border-radius: 4px; margin: 10px 0; }
+    .progress-bar { height: 100%; background: var(--accent); border-radius: 4px; transition: width .3s; width: 0; }
+    #progress-log { max-height: 150px; overflow-y: auto; font-size: 11px; font-family: monospace;
+                    color: #a8b3cf; background: #0a0d14; border-radius: 6px; padding: 8px; margin-top: 8px; }
+  </style>
+</head>
+<body>
+<nav>
+  <a class="logo" href="/">📊 ETF Chat</a>
+  <a href="/">Chat</a>
+  <a href="/admin.html">Admin</a>
+  <a href="/etf-manager.html" class="active">ETF Manager</a>
+</nav>
+
+<div class="container">
+  <h1>ETF Manager</h1>
+
+  <!-- Progress area -->
+  <div id="progress-area">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <b id="progress-title">Download in corso…</b>
+      <span id="progress-pct" style="font-size:12px;color:var(--text-muted)">0%</span>
+    </div>
+    <div class="progress-bar-wrap"><div class="progress-bar" id="progress-bar"></div></div>
+    <div id="progress-log"></div>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <input class="search" type="text" id="search" placeholder="Cerca per simbolo o nome…" oninput="filterTable()">
+    <select class="filter" id="region-filter" onchange="filterTable()">
+      <option value="">Tutte le regioni</option>
+    </select>
+    <select class="filter" id="status-filter" onchange="filterTable()">
+      <option value="">Tutti gli stati</option>
+      <option value="1">Nel database</option>
+      <option value="0">Non nel database</option>
+    </select>
+    <button class="btn btn-ghost" onclick="selectAll()">Seleziona tutti</button>
+    <button class="btn btn-ghost" onclick="deselectAll()">Deseleziona tutti</button>
+  </div>
+
+  <!-- Group chips -->
+  <div class="groups" id="groups"></div>
+
+  <!-- Stats -->
+  <div class="stats-bar" id="stats-bar"></div>
+
+  <!-- Action buttons -->
+  <div style="display:flex;gap:10px;margin-bottom:14px">
+    <button class="btn btn-primary" id="btn-populate" onclick="populateSelected()">⬇ Popola selezionati</button>
+    <button class="btn btn-danger"  id="btn-remove"   onclick="removeSelected()">🗑 Rimuovi selezionati</button>
+  </div>
+
+  <!-- Table -->
+  <div class="table-wrap">
+    <table id="etf-table">
+      <thead>
+        <tr>
+          <th><input type="checkbox" class="chk" id="chk-all" onchange="toggleAll(this)"></th>
+          <th>Simbolo</th><th>Nome</th><th>Gruppo</th><th>Categoria</th><th>Regione</th><th>Stato</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+let catalog = [];
+let activeGroup = null;
+let pollInterval = null;
+
+async function init() {
+  const res = await fetch("/api/etf-manager/catalog");
+  const d = await res.json();
+  catalog = d.catalog;
+
+  // Popola regioni
+  const regions = [...new Set(catalog.map(e => e.region).filter(Boolean))].sort();
+  const sel = document.getElementById("region-filter");
+  regions.forEach(r => sel.innerHTML += `<option value="${r}">${r}</option>`);
+
+  // Popola gruppi
+  const groups = [...new Set(catalog.map(e => e.group_name))].sort();
+  const gc = document.getElementById("groups");
+  groups.forEach(g => {
+    const chip = document.createElement("span");
+    chip.className = "group-chip";
+    chip.textContent = g;
+    chip.dataset.group = g;
+    chip.onclick = () => toggleGroup(g, chip);
+    gc.appendChild(chip);
+  });
+
+  filterTable();
+  checkJobStatus();
+}
+
+function toggleGroup(g, chip) {
+  if (activeGroup === g) {
+    activeGroup = null;
+    chip.classList.remove("active");
+  } else {
+    document.querySelectorAll(".group-chip").forEach(c => c.classList.remove("active"));
+    activeGroup = g;
+    chip.classList.add("active");
+  }
+  filterTable();
+}
+
+function filterTable() {
+  const q      = document.getElementById("search").value.toLowerCase();
+  const region = document.getElementById("region-filter").value;
+  const status = document.getElementById("status-filter").value;
+
+  const visible = catalog.filter(e => {
+    if (q && !e.symbol.toLowerCase().includes(q) && !e.name.toLowerCase().includes(q)) return false;
+    if (region && e.region !== region) return false;
+    if (status !== "" && String(e.is_in_db ? 1 : 0) !== status) return false;
+    if (activeGroup && e.group_name !== activeGroup) return false;
+    return true;
+  });
+
+  const inDb = visible.filter(e => e.is_in_db).length;
+  document.getElementById("stats-bar").innerHTML =
+    `Mostrati <b>${visible.length}</b> ETF — <b>${inDb}</b> nel database, <b>${visible.length - inDb}</b> non presenti`;
+
+  const tbody = document.getElementById("tbody");
+  tbody.innerHTML = visible.map(e => `
+    <tr data-symbol="${e.symbol}">
+      <td><input type="checkbox" class="chk row-chk" data-symbol="${e.symbol}"></td>
+      <td class="sym">${e.symbol}</td>
+      <td>${escHtml(e.name)}</td>
+      <td>${escHtml(e.group_name)}</td>
+      <td>${escHtml(e.category)}</td>
+      <td>${e.region || '—'}</td>
+      <td>${e.is_in_db
+        ? '<span class="badge-indb">✓ Nel DB</span>'
+        : '<span class="badge-notdb">Non presente</span>'}</td>
+    </tr>`).join('');
+}
+
+function getChecked() {
+  return [...document.querySelectorAll(".row-chk:checked")].map(c => c.dataset.symbol);
+}
+
+function selectAll() {
+  document.querySelectorAll(".row-chk").forEach(c => c.checked = true);
+}
+function deselectAll() {
+  document.querySelectorAll(".row-chk").forEach(c => c.checked = false);
+  document.getElementById("chk-all").checked = false;
+}
+function toggleAll(master) {
+  document.querySelectorAll(".row-chk").forEach(c => c.checked = master.checked);
+}
+
+async function populateSelected() {
+  const syms = getChecked();
+  if (!syms.length) { alert("Seleziona almeno un ETF"); return; }
+  if (!confirm(`Scaricare dati per ${syms.length} ETF? Potrebbe richiedere alcuni minuti.`)) return;
+
+  const res = await fetch("/api/etf-manager/populate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ symbols: syms }),
+  });
+  const d = await res.json();
+  if (res.ok) {
+    showProgress();
+    startPolling();
+  } else {
+    alert(d.detail || "Errore");
+  }
+}
+
+async function removeSelected() {
+  const syms = getChecked();
+  if (!syms.length) { alert("Seleziona almeno un ETF"); return; }
+  if (!confirm(`Rimuovere dal database ${syms.length} ETF?`)) return;
+  for (const s of syms) {
+    await fetch(`/api/etf-manager/remove/${s}`, { method: "DELETE" });
+  }
+  await init();
+}
+
+function showProgress() {
+  document.getElementById("progress-area").style.display = "block";
+  document.getElementById("progress-log").textContent = "";
+}
+
+function startPolling() {
+  if (pollInterval) clearInterval(pollInterval);
+  pollInterval = setInterval(async () => {
+    const res = await fetch("/api/etf-manager/status");
+    const d = await res.json();
+    const pct = d.total ? Math.round((d.progress / d.total) * 100) : 0;
+    document.getElementById("progress-bar").style.width = pct + "%";
+    document.getElementById("progress-pct").textContent = pct + "%";
+    document.getElementById("progress-title").textContent =
+      d.running ? `Download in corso… (${d.progress}/${d.total}) — ${d.current}` : "Download completato";
+    document.getElementById("progress-log").textContent = d.log.join("\n");
+
+    if (!d.running) {
+      clearInterval(pollInterval);
+      pollInterval = null;
+      await init();
+    }
+  }, 1500);
+}
+
+async function checkJobStatus() {
+  const res = await fetch("/api/etf-manager/status");
+  const d = await res.json();
+  if (d.running) { showProgress(); startPolling(); }
+}
+
+function escHtml(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+init();
+</script>
+</body>
+</html>

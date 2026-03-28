@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ETF Chat — Admin</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --surface2: #222636;
+      --border: #2a2e42; --text: #e2e8f0; --text-muted: #64748b;
+      --accent: #4f8ef7; --green: #22c55e; --red: #ef4444;
+      --amber: #f59e0b; --purple: #a78bfa;
+    }
+    body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; font-size: 14px; }
+
+    /* ── Nav ── */
+    nav { background: var(--surface); border-bottom: 1px solid var(--border);
+          padding: 0 24px; height: 52px; display: flex; align-items: center; gap: 24px; }
+    nav .logo { font-weight: 700; font-size: 16px; color: var(--accent); text-decoration: none; }
+    nav a { color: var(--text-muted); text-decoration: none; font-size: 13px; }
+    nav a:hover, nav a.active { color: var(--text); }
+    nav .spacer { flex: 1; }
+
+    /* ── Layout ── */
+    .container { max-width: 1200px; margin: 0 auto; padding: 24px 16px; }
+    h1 { font-size: 22px; margin-bottom: 24px; }
+    h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .06em; }
+
+    /* ── Filter bar ── */
+    .filter-bar { display: flex; gap: 12px; align-items: flex-end; margin-bottom: 24px; flex-wrap: wrap; }
+    .filter-bar label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-muted); }
+    .filter-bar input[type=date] {
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 6px; padding: 6px 10px; font-size: 13px;
+    }
+    .btn { padding: 7px 16px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; font-weight: 600; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { opacity: .9; }
+
+    /* ── Summary cards ── */
+    #summary-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 28px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; }
+    .card .label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); margin-bottom: 6px; }
+    .card .value { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .card .value.green { color: var(--green); }
+    .card .value.amber { color: var(--amber); }
+    .card .value.purple { color: var(--purple); }
+
+    /* ── Charts ── */
+    .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 28px; }
+    @media (max-width: 700px) { .charts { grid-template-columns: 1fr; } }
+    .chart-box { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+    .chart-box canvas { max-height: 220px; }
+
+    /* ── Sessions table ── */
+    .sessions-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .pagination { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--text-muted); }
+    .pagination button { background: var(--surface2); border: 1px solid var(--border); color: var(--text); border-radius: 5px; padding: 4px 10px; cursor: pointer; font-size: 12px; }
+    .pagination button:disabled { opacity: .4; cursor: default; }
+
+    .session-item { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; overflow: hidden; }
+    .session-header { padding: 10px 14px; cursor: pointer; display: flex; gap: 12px; align-items: center; }
+    .session-header:hover { background: var(--surface2); }
+    .session-id { font-family: monospace; font-size: 11px; color: var(--text-muted); }
+    .session-meta { font-size: 12px; color: var(--text-muted); margin-left: auto; }
+    .badge { font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 600; }
+    .badge-blue { background: rgba(79,142,247,.15); color: var(--accent); }
+
+    .exchanges { padding: 0 14px 12px; display: none; }
+    .exchanges.open { display: block; }
+    .exchange { border-left: 2px solid var(--border); padding: 8px 12px; margin-top: 8px; }
+    .exchange.user { border-color: var(--accent); }
+    .exchange.ai   { border-color: var(--green); }
+    .exchange .role { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); margin-bottom: 4px; }
+    .exchange .msg  { font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+    .exchange .meta { font-size: 10px; color: var(--text-muted); margin-top: 4px; }
+
+    .empty-state { text-align: center; color: var(--text-muted); padding: 48px; }
+  </style>
+</head>
+<body>
+<nav>
+  <a class="logo" href="/">📊 ETF Chat</a>
+  <a href="/">Chat</a>
+  <a href="/admin.html" class="active">Admin</a>
+  <a href="/etf-manager.html">ETF Manager</a>
+  <span class="spacer"></span>
+</nav>
+
+<div class="container">
+  <h1>Dashboard Admin</h1>
+
+  <!-- Filtro date -->
+  <div class="filter-bar">
+    <label>Data inizio <input type="date" id="start-date"></label>
+    <label>Data fine   <input type="date" id="end-date"></label>
+    <button class="btn btn-primary" onclick="loadAll()">Applica</button>
+    <button class="btn" style="background:var(--surface2);border:1px solid var(--border)" onclick="resetFilter()">Reset</button>
+  </div>
+
+  <!-- Cards -->
+  <div id="summary-cards">
+    <div class="card"><div class="label">Sessioni</div><div class="value green" id="c-sessions">—</div></div>
+    <div class="card"><div class="label">Messaggi</div><div class="value amber" id="c-messages">—</div></div>
+    <div class="card"><div class="label">Risposte AI</div><div class="value" id="c-responses">—</div></div>
+    <div class="card"><div class="label">Token in</div><div class="value purple" id="c-tin">—</div></div>
+    <div class="card"><div class="label">Token out</div><div class="value purple" id="c-tout">—</div></div>
+  </div>
+
+  <!-- Grafici -->
+  <div class="charts">
+    <div class="chart-box">
+      <h2>Accessi giornalieri</h2>
+      <canvas id="chart-access"></canvas>
+    </div>
+    <div class="chart-box">
+      <h2>Token giornalieri</h2>
+      <canvas id="chart-tokens"></canvas>
+    </div>
+  </div>
+
+  <!-- Sessioni -->
+  <div class="sessions-header">
+    <h2 style="margin:0">Sessioni</h2>
+    <div class="pagination">
+      <button id="btn-prev" onclick="prevPage()">‹ Prec</button>
+      <span id="page-info">—</span>
+      <button id="btn-next" onclick="nextPage()">Succ ›</button>
+    </div>
+  </div>
+  <div id="sessions-list"><div class="empty-state">Nessun dato</div></div>
+</div>
+
+<script>
+let chartAccess = null, chartTokens = null;
+let currentPage = 1;
+const PAGE_SIZE = 20;
+
+function getDateParams() {
+  const s = document.getElementById("start-date").value;
+  const e = document.getElementById("end-date").value;
+  const p = new URLSearchParams();
+  if (s) p.set("start", s);
+  if (e) p.set("end", e);
+  return p.toString() ? "?" + p.toString() : "";
+}
+
+function resetFilter() {
+  document.getElementById("start-date").value = "";
+  document.getElementById("end-date").value = "";
+  loadAll();
+}
+
+async function loadAll() {
+  currentPage = 1;
+  await Promise.all([loadStats(), loadTimeline(), loadSessions()]);
+}
+
+async function loadStats() {
+  const res = await fetch("/api/admin/stats" + getDateParams());
+  const d = await res.json();
+  document.getElementById("c-sessions").textContent  = d.total_sessions.toLocaleString();
+  document.getElementById("c-messages").textContent  = d.total_messages.toLocaleString();
+  document.getElementById("c-responses").textContent = d.total_responses.toLocaleString();
+  document.getElementById("c-tin").textContent  = d.total_input_tokens.toLocaleString();
+  document.getElementById("c-tout").textContent = d.total_output_tokens.toLocaleString();
+}
+
+async function loadTimeline() {
+  const res = await fetch("/api/admin/timeline" + getDateParams());
+  const d = await res.json();
+  const rows = d.timeline;
+  const labels = rows.map(r => r.date);
+
+  const accessData  = { labels, datasets: [
+    { label: "Sessioni",  data: rows.map(r => r.sessions),  borderColor: "#4f8ef7", backgroundColor: "rgba(79,142,247,.15)", tension: .3, fill: true },
+    { label: "Messaggi",  data: rows.map(r => r.messages),  borderColor: "#22c55e", backgroundColor: "rgba(34,197,94,.1)",   tension: .3, fill: true },
+  ]};
+  const tokenData  = { labels, datasets: [
+    { label: "Token in",  data: rows.map(r => r.input_tokens),  borderColor: "#a78bfa", backgroundColor: "rgba(167,139,250,.15)", tension: .3, fill: true },
+    { label: "Token out", data: rows.map(r => r.output_tokens), borderColor: "#f59e0b", backgroundColor: "rgba(245,158,11,.1)",   tension: .3, fill: true },
+  ]};
+
+  const opts = { responsive: true, plugins: { legend: { labels: { color: "#94a3b8", font: { size: 11 } } } },
+                 scales: { x: { ticks: { color: "#64748b", maxTicksLimit: 8 } }, y: { ticks: { color: "#64748b" } } } };
+
+  if (chartAccess) chartAccess.destroy();
+  chartAccess = new Chart(document.getElementById("chart-access"), { type: "line", data: accessData, options: opts });
+
+  if (chartTokens) chartTokens.destroy();
+  chartTokens = new Chart(document.getElementById("chart-tokens"), { type: "line", data: tokenData, options: opts });
+}
+
+async function loadSessions() {
+  const base = getDateParams();
+  const sep  = base ? "&" : "?";
+  const url  = `/api/admin/sessions${base}${sep}page=${currentPage}&limit=${PAGE_SIZE}`;
+  const res  = await fetch(url);
+  const d    = await res.json();
+
+  const totalPages = Math.ceil(d.total / PAGE_SIZE) || 1;
+  document.getElementById("page-info").textContent = `Pag. ${currentPage} / ${totalPages} (${d.total} totali)`;
+  document.getElementById("btn-prev").disabled = currentPage <= 1;
+  document.getElementById("btn-next").disabled = currentPage >= totalPages;
+
+  const list = document.getElementById("sessions-list");
+  if (!d.sessions.length) { list.innerHTML = '<div class="empty-state">Nessuna sessione nel periodo selezionato</div>'; return; }
+
+  list.innerHTML = d.sessions.map(s => `
+    <div class="session-item">
+      <div class="session-header" onclick="toggleSession(this)">
+        <span class="session-id">${s.session_id.slice(0, 8)}…</span>
+        <span class="badge badge-blue">${s.msg_count} msg</span>
+        <span class="session-meta">${s.first_at?.slice(0,16).replace("T"," ")} → ${s.last_at?.slice(0,16).replace("T"," ")}</span>
+        <span>▼</span>
+      </div>
+      <div class="exchanges">
+        ${s.exchanges.map(e => `
+          <div class="exchange ${e.event_type === 'user_message' ? 'user' : 'ai'}">
+            <div class="role">${e.event_type === 'user_message' ? '👤 Utente' : '🤖 AI'}</div>
+            <div class="msg">${escHtml(e.message_text || e.response_text || '')}</div>
+            ${e.event_type === 'ai_response' ? `<div class="meta">${e.input_tokens}↑ ${e.output_tokens}↓ tok · ${e.elapsed_ms}ms · ${e.iterations} iter · ${e.sql_count} SQL</div>` : ''}
+          </div>`).join('')}
+      </div>
+    </div>`).join('');
+}
+
+function toggleSession(header) {
+  const ex = header.nextElementSibling;
+  ex.classList.toggle("open");
+  header.querySelector("span:last-child").textContent = ex.classList.contains("open") ? "▲" : "▼";
+}
+function prevPage() { if (currentPage > 1) { currentPage--; loadSessions(); } }
+function nextPage() { currentPage++; loadSessions(); }
+function escHtml(s) { return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+// Imposta date default: ultimi 30 giorni
+const today = new Date();
+const d30 = new Date(today); d30.setDate(d30.getDate() - 30);
+document.getElementById("end-date").value   = today.toISOString().slice(0,10);
+document.getElementById("start-date").value = d30.toISOString().slice(0,10);
+
+loadAll();
+</script>
+</body>
+</html>

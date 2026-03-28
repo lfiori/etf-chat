@@ -401,6 +401,12 @@
     <div class="stat-row"><span>Record prezzi</span><span id="stat-prices">—</span></div>
     <div class="stat-row"><span>Dal</span><span id="stat-from">—</span></div>
     <div class="stat-row"><span>Al</span><span id="stat-to">—</span></div>
+    <div class="stat-row"><span>Ultimo agg.</span><span id="stat-last-update">—</span></div>
+  </div>
+
+  <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:6px">
+    <a href="/admin.html" style="color:var(--text-muted);font-size:12px;text-decoration:none;padding:5px 8px;border-radius:6px;display:flex;align-items:center;gap:6px" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''" >📊 Dashboard Admin</a>
+    <a href="/etf-manager.html" style="color:var(--text-muted);font-size:12px;text-decoration:none;padding:5px 8px;border-radius:6px;display:flex;align-items:center;gap:6px" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">⚙️ ETF Manager</a>
   </div>
 
   <div id="examples">
@@ -491,6 +497,12 @@ async function loadStats() {
     document.getElementById("stat-prices").textContent = d.price_records.toLocaleString("it");
     document.getElementById("stat-from").textContent   = d.date_from ?? "—";
     document.getElementById("stat-to").textContent     = d.date_to   ?? "—";
+
+    // Ultimo aggiornamento ETF
+    fetch("/api/admin/last-update").then(r => r.json()).then(u => {
+      const el = document.getElementById("stat-last-update");
+      if (u.last_update) el.textContent = u.last_update.run_at?.slice(0,10) ?? "—";
+    }).catch(() => {});
 
     statusDot.classList.remove("offline");
     statusText.textContent = `Database: ${d.etf_count} ETF · ${d.price_records.toLocaleString("it")} record`;

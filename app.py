@@ -10,6 +10,7 @@ import logging
 import os
 import sqlite3
 import time
+from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -37,12 +38,36 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from routers import admin as admin_router
+from routers import etf_manager as etf_manager_router
+
 # ─────────────────────────── configurazione ────────────────────────────────
-DB_PATH = "etf_database.db"
+DB_PATH = os.environ.get("ETF_DB_PATH", "etf_database.db")
 MAX_ROWS = 500        # righe massime restituite da una query
 MAX_ITERATIONS = 12   # iterazioni massime del loop agente
 
-app = FastAPI(title="ETF Chat API", version="1.0.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Crea tabelle di tracking se non esistono
+    if os.path.exists(DB_PATH):
+        from db_tracking import create_tracking_tables, seed_catalog_table_from_setup
+        create_tracking_tables(DB_PATH)
+        seed_catalog_table_from_setup(DB_PATH)
+    # Avvia scheduler
+    from scheduler import create_scheduler
+    _scheduler = create_scheduler(DB_PATH)
+    _scheduler.start()
+    log.info("scheduler_started", extra={"event": "scheduler_started"})
+    yield
+    _scheduler.shutdown(wait=False)
+    log.info("scheduler_stopped", extra={"event": "scheduler_stopped"})
+
+
+app = FastAPI(title="ETF Chat API", version="1.0.0", lifespan=lifespan)
+
+app.include_router(admin_router.router)
+app.include_router(etf_manager_router.router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -233,8 +258,12 @@ class ChatRequest(BaseModel):
 async def chat(req: ChatRequest):
     session_id = req.session_id or str(uuid.uuid4())
 
-    if session_id not in sessions:
+    is_new_session = session_id not in sessions
+    if is_new_session:
         sessions[session_id] = []
+        if os.path.exists(DB_PATH):
+            from db_tracking import record_access
+            record_access(DB_PATH, "session_start", session_id)
 
     messages = sessions[session_id]
     messages.append({"role": "user", "content": req.message})
@@ -301,6 +330,17 @@ async def chat(req: ChatRequest):
                 "iterations": iteration + 1,
                 "elapsed_ms": elapsed_ms,
             })
+            if os.path.exists(DB_PATH):
+                from db_tracking import record_access
+                record_access(DB_PATH, "user_message", session_id,
+                              message_text=req.message)
+                record_access(DB_PATH, "ai_response", session_id,
+                              response_text=final_text,
+                              input_tokens=total_input_tokens,
+                              output_tokens=total_output_tokens,
+                              elapsed_ms=elapsed_ms,
+                              sql_count=len(sql_queries),
+                              iterations=iteration + 1)
             sessions[session_id] = messages
             return {
                 "response": final_text,
