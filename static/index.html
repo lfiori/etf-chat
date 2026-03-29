@@ -412,6 +412,13 @@
   <div id="examples">
     <div class="examples-title">Domande di esempio</div>
   </div>
+
+  <div style="padding:10px 16px;border-top:1px solid var(--border);margin-top:auto">
+    <div style="font-size:10px;color:var(--text-muted);display:flex;align-items:center;gap:6px">
+      <span>🔖</span>
+      <span id="version-label">versione —</span>
+    </div>
+  </div>
 </aside>
 
 <!-- ── MAIN ────────────────────────────────────────────────── -->
@@ -497,6 +504,12 @@ async function loadStats() {
     document.getElementById("stat-prices").textContent = d.price_records.toLocaleString("it");
     document.getElementById("stat-from").textContent   = d.date_from ?? "—";
     document.getElementById("stat-to").textContent     = d.date_to   ?? "—";
+
+    // Versione deployata
+    fetch("/api/version").then(r => r.json()).then(v => {
+      document.getElementById("version-label").textContent = `v${v.commit}`;
+      document.getElementById("version-label").title = v.message;
+    }).catch(() => {});
 
     // Ultimo aggiornamento ETF
     fetch("/api/admin/last-update").then(r => r.json()).then(u => {
