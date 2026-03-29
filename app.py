@@ -588,6 +588,23 @@ async def delete_session(session_id: str):
     return {"ok": True}
 
 
+@app.get("/api/version")
+async def version():
+    """Restituisce il commit hash deployato."""
+    import subprocess
+    try:
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"], text=True
+        ).strip()
+        message = subprocess.check_output(
+            ["git", "log", "-1", "--pretty=%s"], text=True
+        ).strip()
+    except Exception:
+        commit = os.environ.get("RENDER_GIT_COMMIT", "unknown")[:7]
+        message = ""
+    return {"commit": commit, "message": message}
+
+
 @app.get("/api/stats")
 async def stats():
     """Statistiche sul database."""
