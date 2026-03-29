@@ -527,17 +527,84 @@ async function sendMessage(text) {
   setLoading(true);
 
   try {
-    const res = await fetch("/api/chat", {
+    const res = await fetch("/api/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: text, session_id: sessionId }),
     });
 
-    const data = await res.json();
-    sessionId = data.session_id;
+    if (!res.ok) throw new Error("Errore server");
 
     typingEl.remove();
-    appendMsg("assistant", data.response, data.sql_queries, data.trace ?? null);
+
+    // Crea il bubble di risposta subito (vuoto)
+    const wrap = document.createElement("div");
+    wrap.className = "msg assistant";
+    wrap.innerHTML = `<div class="avatar">🤖</div><div class="bubble"><div class="stream-content"></div></div>`;
+    messagesEl.appendChild(wrap);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    const contentEl = wrap.querySelector(".stream-content");
+    const bubble    = wrap.querySelector(".bubble");
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let fullText = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const lines = buffer.split("\n");
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const evt = JSON.parse(line.slice(6));
+
+        if (evt.type === "token") {
+          fullText += evt.text;
+          contentEl.innerHTML = renderMarkdown(fullText);
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+
+        } else if (evt.type === "sql") {
+          let sqlBadge = bubble.querySelector(".sql-running");
+          if (!sqlBadge) {
+            sqlBadge = document.createElement("div");
+            sqlBadge.className = "sql-running";
+            sqlBadge.style.cssText = "font-size:11px;color:var(--text-muted);margin-top:6px";
+            bubble.appendChild(sqlBadge);
+          }
+          sqlBadge.textContent = `⚙ SQL in esecuzione…`;
+
+        } else if (evt.type === "done") {
+          const sqlBadge = bubble.querySelector(".sql-running");
+          if (sqlBadge) sqlBadge.remove();
+          sessionId = evt.session_id;
+
+          if (evt.sql_queries?.length) {
+            const details = document.createElement("details");
+            details.className = "sql-disclosure";
+            const summary = document.createElement("summary");
+            summary.innerHTML = `🔍 Query SQL eseguita (${evt.sql_queries.length})`;
+            details.appendChild(summary);
+            evt.sql_queries.forEach(q => {
+              const pre = document.createElement("pre");
+              pre.className = "sql-code";
+              pre.textContent = q;
+              details.appendChild(pre);
+            });
+            bubble.appendChild(details);
+          }
+          if (evt.trace) bubble.appendChild(buildTracePanel(evt.trace));
+
+        } else if (evt.type === "error") {
+          contentEl.innerHTML = `⚠️ ${escHtml(evt.message)}`;
+        }
+      }
+    }
+
   } catch (err) {
     typingEl.remove();
     appendMsg("assistant", "⚠️ Errore di comunicazione con il server. Riprova.");

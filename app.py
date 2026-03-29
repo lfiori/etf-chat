@@ -34,7 +34,7 @@ log.propagate = False
 import anthropic
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -43,8 +43,10 @@ from routers import etf_manager as etf_manager_router
 
 # ─────────────────────────── configurazione ────────────────────────────────
 DB_PATH = os.environ.get("ETF_DB_PATH", "etf_database.db")
-MAX_ROWS = 500        # righe massime restituite da una query
-MAX_ITERATIONS = 12   # iterazioni massime del loop agente
+MAX_ROWS = 100        # righe massime restituite da una query (ridotto per risparmiare token)
+MAX_ITERATIONS = 5    # iterazioni massime del loop agente (ridotto da 12)
+MAX_HISTORY = 10      # massimo messaggi di cronologia inviati a Claude
+MODEL = os.environ.get("ETF_CHAT_MODEL", "claude-haiku-4-5-20251001")  # più veloce e economico
 
 
 @asynccontextmanager
@@ -286,12 +288,16 @@ async def chat(req: ChatRequest):
             "session": session_id,
             "iteration": iteration + 1,
         })
+        # Tronca la cronologia per limitare i token: mantieni sempre
+        # il primo messaggio utente + gli ultimi MAX_HISTORY messaggi
+        trimmed = messages[:1] + messages[-(MAX_HISTORY - 1):] if len(messages) > MAX_HISTORY else messages
+
         response = client.messages.create(
-            model="claude-opus-4-6",
-            max_tokens=4096,
+            model=MODEL,
+            max_tokens=2048,
             system=SYSTEM_PROMPT,
             tools=TOOLS,
-            messages=messages,
+            messages=trimmed,
         )
 
         total_input_tokens  += response.usage.input_tokens
@@ -438,6 +444,133 @@ async def chat(req: ChatRequest):
             "iteration_details": iteration_details,
         },
     }
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(req: ChatRequest):
+    """
+    Variante streaming di /api/chat.
+    Usa Server-Sent Events: invia i token man mano che arrivano da Claude,
+    poi invia un evento finale 'done' con sql_queries e trace.
+    """
+    import asyncio
+
+    session_id = req.session_id or str(uuid.uuid4())
+    is_new_session = session_id not in sessions
+    if is_new_session:
+        sessions[session_id] = []
+        if os.path.exists(DB_PATH):
+            from db_tracking import record_access
+            record_access(DB_PATH, "session_start", session_id)
+
+    messages = sessions[session_id]
+    messages.append({"role": "user", "content": req.message})
+
+    async def event_generator():
+        sql_queries: list[str] = []
+        _t_start = time.monotonic()
+        total_input_tokens = 0
+        total_output_tokens = 0
+        iteration_details: list[dict] = []
+        final_text = ""
+
+        try:
+            for iteration in range(MAX_ITERATIONS):
+                trimmed = messages[:1] + messages[-(MAX_HISTORY - 1):] if len(messages) > MAX_HISTORY else messages
+                _iter_sql_calls: list[dict] = []
+                accumulated_text = ""
+                tool_uses = []
+                stop_reason = None
+                input_tok = 0
+                output_tok = 0
+
+                # Streaming call a Claude
+                with client.messages.stream(
+                    model=MODEL,
+                    max_tokens=2048,
+                    system=SYSTEM_PROMPT,
+                    tools=TOOLS,
+                    messages=trimmed,
+                ) as stream:
+                    for event in stream:
+                        if hasattr(event, "type"):
+                            if event.type == "content_block_delta":
+                                if hasattr(event.delta, "text"):
+                                    chunk = event.delta.text
+                                    accumulated_text += chunk
+                                    # Invia il token al frontend
+                                    yield f"data: {json.dumps({'type': 'token', 'text': chunk})}\n\n"
+                            elif event.type == "message_stop":
+                                pass
+
+                    # Recupera il messaggio completo post-stream
+                    final_msg = stream.get_final_message()
+                    stop_reason = final_msg.stop_reason
+                    input_tok  = final_msg.usage.input_tokens
+                    output_tok = final_msg.usage.output_tokens
+                    tool_uses  = [b for b in final_msg.content if b.type == "tool_use"]
+
+                total_input_tokens  += input_tok
+                total_output_tokens += output_tok
+
+                content_dicts = _content_to_dicts(final_msg.content)
+                messages.append({"role": "assistant", "content": content_dicts})
+
+                if stop_reason == "end_turn":
+                    final_text = accumulated_text or next(
+                        (b.text for b in final_msg.content if b.type == "text"), ""
+                    )
+                    iteration_details.append({
+                        "iteration": iteration + 1, "stop_reason": "end_turn",
+                        "input_tokens": input_tok, "output_tokens": output_tok, "sql_calls": [],
+                    })
+                    break
+
+                if stop_reason == "tool_use" and tool_uses:
+                    tool_results = []
+                    for block in tool_uses:
+                        if block.name != "execute_sql":
+                            continue
+                        query = block.input.get("query", "")
+                        sql_queries.append(query)
+                        # Notifica il frontend che sta eseguendo SQL
+                        yield f"data: {json.dumps({'type': 'sql', 'query': query})}\n\n"
+                        result = execute_sql(query)
+                        _sql_call = {"query": query, "row_count": result.get("row_count"), "error": result.get("error")}
+                        _iter_sql_calls.append(_sql_call)
+                        tool_results.append({
+                            "type": "tool_result", "tool_use_id": block.id,
+                            "content": json.dumps(result, ensure_ascii=False, default=str),
+                        })
+                    iteration_details.append({
+                        "iteration": iteration + 1, "stop_reason": "tool_use",
+                        "input_tokens": input_tok, "output_tokens": output_tok,
+                        "sql_calls": _iter_sql_calls,
+                    })
+                    if tool_results:
+                        messages.append({"role": "user", "content": tool_results})
+                else:
+                    break
+
+            elapsed_ms = round((time.monotonic() - _t_start) * 1000)
+            if os.path.exists(DB_PATH):
+                from db_tracking import record_access
+                record_access(DB_PATH, "user_message", session_id, message_text=req.message)
+                record_access(DB_PATH, "ai_response", session_id,
+                              response_text=final_text,
+                              input_tokens=total_input_tokens, output_tokens=total_output_tokens,
+                              elapsed_ms=elapsed_ms, sql_count=len(sql_queries),
+                              iterations=len(iteration_details))
+            sessions[session_id] = messages
+
+            # Evento finale con metadati
+            yield f"data: {json.dumps({'type': 'done', 'session_id': session_id, 'sql_queries': sql_queries, 'trace': {'iterations': len(iteration_details), 'elapsed_ms': elapsed_ms, 'total_tokens': {'input': total_input_tokens, 'output': total_output_tokens, 'total': total_input_tokens + total_output_tokens}, 'iteration_details': iteration_details}})}\n\n"
+
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.post("/api/chat/new")
